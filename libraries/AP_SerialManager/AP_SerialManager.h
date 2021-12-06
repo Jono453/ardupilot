@@ -89,6 +89,11 @@
 #define AP_SERIALMANAGER_EFI_MS_BUFSIZE_RX     512
 #define AP_SERIALMANAGER_EFI_MS_BUFSIZE_TX     16
 
+// Power4Flight Intelliject EFI protocol
+#define AP_SERIALMANAGER_EFI_INTELLIJECT_BAUD  			57600
+#define AP_SERIALMANAGER_EFI_INTELLIJECT_BUFSIZE_RX     512
+#define AP_SERIALMANAGER_EFI_INTELLIJECT_TX     		16
+
 // SBUS servo outputs
 #define AP_SERIALMANAGER_SBUS1_BAUD           100000
 #define AP_SERIALMANAGER_SBUS1_BUFSIZE_RX     16
@@ -125,7 +130,7 @@ public:
         SerialProtocol_Rangefinder = 9,
         SerialProtocol_FrSky_SPort_Passthrough = 10, // FrSky SPort Passthrough (OpenTX) protocol (X-receivers)
         SerialProtocol_Lidar360 = 11,                // Lightware SF40C, TeraRanger Tower or RPLidarA2
-        SerialProtocol_Aerotenna_USD1      = 12, // USD1 support - deprecated, users should use Rangefinder
+        SerialProtocol_Aerotenna_uLanding      = 12, // Ulanding support - deprecated, users should use Rangefinder
         SerialProtocol_Beacon = 13,
         SerialProtocol_Volz = 14,                    // Volz servo protocol
         SerialProtocol_Sbus1 = 15,
@@ -151,11 +156,7 @@ public:
         SerialProtocol_ADSB = 35,
         SerialProtocol_AHRS = 36,
         SerialProtocol_SmartAudio = 37,
-        SerialProtocol_FETtecOneWire = 38,
-        SerialProtocol_Torqeedo = 39,
-        SerialProtocol_AIS = 40,
-        SerialProtocol_CoDevESC = 41,
-        SerialProtocol_MSP_DisplayPort = 42,
+        SerialProtocol_EFI_Intelliject = 38,		   // Intelliject ECU (Cobra Aero A33N)
         SerialProtocol_NumProtocols                    // must be the last value
     };
 

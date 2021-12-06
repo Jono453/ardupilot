@@ -19,6 +19,7 @@
 
 #include "AP_EFI_Serial_MS.h"
 #include "AP_EFI_NWPMU.h"
+#include "AP_EFI_Intelliject.h"
 #include <AP_Logger/AP_Logger.h>
 
 #if HAL_MAX_CAN_PROTOCOL_DRIVERS
@@ -32,7 +33,7 @@ const AP_Param::GroupInfo AP_EFI::var_info[] = {
     // @Param: _TYPE
     // @DisplayName: EFI communication type
     // @Description: What method of communication is used for EFI #1
-    // @Values: 0:None,1:Serial-MS,2:NWPMU
+    // @Values: 0:None,1:Serial-MS,2:NWPMU, 3: IntellijectECU
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO_FLAGS("_TYPE", 1, AP_EFI, type, 0, AP_PARAM_FLAG_ENABLE),
@@ -42,6 +43,7 @@ const AP_Param::GroupInfo AP_EFI::var_info[] = {
     // @Description: Used to calibrate fuel flow for MS protocol (Slope)
     // @Range: 0 1
     // @User: Advanced
+    // @RebootRequired: False
     AP_GROUPINFO("_COEF1", 2, AP_EFI, coef1, 0),
 
     // @Param: _COEF2
@@ -49,6 +51,7 @@ const AP_Param::GroupInfo AP_EFI::var_info[] = {
     // @Description: Used to calibrate fuel flow for MS protocol (Offset)
     // @Range: 0 10
     // @User: Advanced
+    // @RebootRequired: False
     AP_GROUPINFO("_COEF2", 3, AP_EFI, coef2, 0),
 
     AP_GROUPEND
@@ -80,6 +83,8 @@ void AP_EFI::init(void)
 #if HAL_EFI_NWPWU_ENABLED
         backend = new AP_EFI_NWPMU(*this);
 #endif
+    case Type::IntellijectECU:
+    	backend = new AP_EFI_Intelliject(*this);
         break;
     default:
         gcs().send_text(MAV_SEVERITY_INFO, "Unknown EFI type");
@@ -123,7 +128,7 @@ void AP_EFI::log_status(void)
 // @Field: CFV: Consumed fueld volume
 // @Field: TPS: Throttle Position
 // @Field: IDX: Index of the publishing ECU
-    AP::logger().WriteStreaming("EFI",
+    AP::logger().Write("EFI",
                        "TimeUS,LP,Rpm,SDT,ATM,IMP,IMT,ECT,OilP,OilT,FP,FCR,CFV,TPS,IDX",
                        "s%qsPPOOPOP--%-",
                        "F00C--00-0-0000",
@@ -144,6 +149,7 @@ void AP_EFI::log_status(void)
                        uint8_t(state.throttle_position_percent),
                        uint8_t(state.ecu_index));
 
+    /*
 // @LoggerMessage: EFI2
 // @Description: Electronic Fuel Injection system data - redux
 // @Field: TimeUS: Time since system startup
@@ -159,7 +165,7 @@ void AP_EFI::log_status(void)
 // @Field: DebS: Debris status
 // @Field: SPU: Spark plug usage
 // @Field: IDX: Index of the publishing ECU
-    AP::logger().WriteStreaming("EFI2",
+    AP::logger().Write("EFI2",
                        "TimeUS,Healthy,ES,GE,CSE,TS,FPS,OPS,DS,MS,DebS,SPU,IDX",
                        "s------------",
                        "F------------",
@@ -189,7 +195,7 @@ void AP_EFI::log_status(void)
 // @Field: EGT: Exhaust gas temperature
 // @Field: Lambda: Estimated lambda coefficient (dimensionless ratio)
 // @Field: IDX: Index of the publishing ECU
-        AP::logger().WriteStreaming("ECYL",
+        AP::logger().Write("ECYL",
                            "TimeUS,Inst,IgnT,InjT,CHT,EGT,Lambda,IDX",
                            "s#dsOO--",
                            "F-0C0000",
@@ -203,10 +209,11 @@ void AP_EFI::log_status(void)
                            state.cylinder_status[i].lambda_coefficient,
                            state.ecu_index);
     }
+    */
 }
 
 /*
-  send EFI_STATUS
+  send EFI_STATUS - this is visible in Mavlink Inspector?
  */
 void AP_EFI::send_mavlink_status(mavlink_channel_t chan)
 {
