@@ -31,13 +31,12 @@ public:
 
 private:
     AP_HAL::UARTDriver *port;
-    void parse_realtime_data();
-    bool read_incoming_realtime_data();
-    float f_to_k(float temp_f) { return (temp_f + 459.67f) * 0.55556f; };
+    //bool read_incoming_realtime_data(); //sample - Serial_MS
+    //float f_to_k(float temp_f) { return (temp_f + 459.67f) * 0.55556f; }; //sample - Serial_MS
+    bool decodeefiTelemetryFast_t(const uint8_t* _pg_data, int* _pg_bytecount, efiTelemetryFast_t* _pg_user); //from Intelliject ECU
+    float float32ScaledFrom1UnsignedBytes(const uint8_t* bytes, int* index, float min, float invscaler);
+    float float32ScaledFrom2UnsignedBeBytes(const uint8_t* bytes, int* index, float min, float invscaler);
 
-    //! Process a packet received from IntelliJect that reports telemetry
-    int processIntelliJectDataPacket(const efiPacket_t* pkt, efisdkdata_t* data);
-    
     // Serial Protocol Variables
     uint32_t checksum;
     uint8_t step;

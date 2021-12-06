@@ -45,12 +45,12 @@ void AP_EFI_Intelliject::update()
 
     if (port->available() == 0 || now - last_response_ms > 200) {
         port->discard_input();
-        // Request an update from the realtime table (7).
-        // The data we need start at offset 6 and ends at 129
-        send_request(7, RT_FIRST_OFFSET, RT_LAST_OFFSET);
+        // no request needed as ECU sends all packets automatically
     }
 }
 
+// SAMPLE FROM MEGASQUIRT SERIAL
+/*
 bool AP_EFI_Intelliject::read_incoming_realtime_data()
 {
     // Data is parsed directly from the buffer, otherwise we would need to allocate
@@ -174,266 +174,79 @@ bool AP_EFI_Intelliject::read_incoming_realtime_data()
     return true;
          
 }
+*/
 
-*!
- * Process a packet received from IntelliJect that reports telemetry
- * \param pkt is the packet to process
- * \param data receives the data contained in the packet
- * \return 1 if the packet was successfully decoded, else it was not a valid data packet
- */
-int AP_EFI_Intelliject::processIntelliJectDataPacket(const efiPacket_t* pkt, efisdkdata_t* data)
+float AP_EFI_Intelliject::float32ScaledFrom1UnsignedBytes(const uint8_t* bytes, int* index, float min, float invscaler)
 {
-    switch(pkt->type)
-    {
-    default:
-        return 0;
+    return (float)(min + invscaler*uint8FromBytes(bytes, index));
+}
 
-    case EFI_PKT_SOFTWAREINFO:  // Software information
-        return decodeefiSoftwareInfoPkt(pkt, &data->software);
-        break;
+float AP_EFI_Intelliject::float32ScaledFrom2UnsignedBeBytes(const uint8_t* bytes, int* index, float min, float invscaler)
+{
+    return (float)(min + invscaler*uint16FromBeBytes(bytes, index));
+}
 
-    case EFI_PKT_HARDWAREINFO:  // Hardware information
-        return decodeefiHardwareInfoPkt(pkt, &data->hardware);
-        break;
+/*!
+ * \brief Decode a efiTelemetryFast_t from a byte array
+ *
+ * Fast telemetry, output at the fast telemetry rate.
+ * \param _pg_data points to the byte array to decoded data from
+ * \param _pg_bytecount points to the starting location in the byte array, and will be incremented by the number of bytes decoded
+ * \param _pg_user is the data to decode from the byte array
+ * \return 1 if the data are decoded, else 0.
+ */
 
-    case EFI_PKT_ENABLE:        // Response to enable command
-        {
-            efiEnable_t enable;
-            memset(&enable, 0, sizeof(enable));
-            if(decodeefiEnablePkt(pkt, &enable))
-            {
-                data->fasttm.ioEnable = enable.ioEnable;
-                data->fasttm.userEnable = enable.userEnable;
-                data->fasttm.spark1Enable = enable.spark1Enable;
-                data->fasttm.spark2Enable = enable.spark2Enable;
-                data->fasttm.spark3Enable = enable.spark3Enable;
-                return 1;
-            }
-        }
-        break;
+// efiTelemetryFast_t is struct that should become the EFI internal_state filled in by backend
+bool AP_EFI_Intelliject::decodeefiTelemetryFast_t(const uint8_t* _pg_data, int* _pg_bytecount, efiTelemetryFast_t* _pg_user)
+{
+    int _pg_byteindex = *_pg_bytecount;
 
-    case EFI_PKT_FUELUSED:  // Response to setting fuel used
-        return decodeefiFuelUsedPkt(pkt, &data->fueltm.fuelConsumption, &data->oilinj.oilConsumption);
-        break;
+    // Engine speed in revolutions per minute
+    // Range of rpm is 0.0 to 16383.75.
+    _pg_user->rpm = float32ScaledFrom2UnsignedBeBytes(_pg_data, &_pg_byteindex, 0.0f, 1.0f/4.0f);
 
-    case EFI_PKT_ENGINEWEAR:            // Engine wear information
-        if(decodeefiEngineWearPkt(pkt, &data->wear))
-            return 1;
-        else
-            return decodeefiEngineWearShortPkt(pkt, &data->wear.hobbs, &data->wear.revcount);
-        break;
+    // Global enable based on physical input
+    _pg_user->ioEnable = (_pg_data[_pg_byteindex] >> 7);
 
-    case EFI_PKT_ENGINEWEAREXT:         // Extended engine &wear information
-        return decodeefiEngineWearExtendedPkt(pkt, &data->wear.hotTime, &data->wear.highLoadTime, &data->wear.peakCHT, &data->wear.numStarts);
-        break;
+    // User global enable.
+    _pg_user->userEnable = ((_pg_data[_pg_byteindex] >> 6) & 0x1);
 
-    case EFI_PKT_SDCARDJOURNAL:
-        return decodeefiSDCardJournalPkt(pkt, &data->sdjournal);
-        break;
+    // User enable for spark1.
+    _pg_user->spark1Enable = ((_pg_data[_pg_byteindex] >> 5) & 0x1);
 
-    case EFI_PKT_RESET:                 // Reset report
-        return decodeefiResetReportPkt(pkt, &data->reset);
-        break;
+    // User enable for spark2.
+    _pg_user->spark2Enable = ((_pg_data[_pg_byteindex] >> 4) & 0x1);
 
-    case EFI_PKT_STICKY_ERRORS:         // Sticky error information
-        if(data->cputm.api < 5)
-        {
-            efiErrorsapi4_t olderrors;
-            if(decodeefiErrorsapi4Pkt(pkt, &olderrors))
-            {
-                data->stickyerrors = convertErrorsapi4ToErrors(olderrors);
-                return 1;
-            }
-            else
-                return 0;
-        }
-        else
-            return decodeefiErrorsPkt(pkt, &data->stickyerrors);
-        break;
+    // User enable for spark3.
+    _pg_user->spark3Enable = ((_pg_data[_pg_byteindex] >> 3) & 0x1);
 
-    case EFI_PKT_TELEMETRYERRORS:       // Dynamic error information
-        if(data->cputm.api < 5)
-        {
-            efiErrorsapi4_t olderrors;
-            if(decodeefiErrorsapi4Pkt(pkt, &olderrors))
-            {
-                data->dynamicerrors = convertErrorsapi4ToErrors(olderrors);
-                return 1;
-            }
-            else
-                return 0;
-        }
-        else
-            return decodeefiErrorsPkt(pkt, &data->dynamicerrors);
-        break;
+    // Source of the throttle command information. If IntelliJect is driving the throttle this is the command source. If IntelliJect is not driving the throttle this is the source of throttle position data.
+    _pg_user->throttleCmdSrc = (efiThrottleSource)((_pg_data[_pg_byteindex]) & 0x7);
+    _pg_byteindex += 1; // close bit field
 
-    case EFI_PKT_TELEMETRYTIME:
-        return decodeefiTelemetryTimePkt(pkt, &data->timetm);
-        break;
+    // Throttle command (0 to 100%) going in.
+    // Range of throttleCmd is 0.0 to 127.5.
+    _pg_user->throttleCmd = float32ScaledFrom1UnsignedBytes(_pg_data, &_pg_byteindex, 0.0f, 1.0f/2.0f);
 
-    case EFI_PKT_TELEMETRYFAST:         // Fast telemetry
-        return decodeefiTelemetryFastPkt(pkt, &data->fasttm);
-        break;
+    // Throttle position (0 to 100%) this may be different from the throttleCmd if a curve is applied, or if the governor is interpreting the throttle command.
+    // Range of throttlePos is 0.0 to 127.5.
+    _pg_user->throttlePos = float32ScaledFrom1UnsignedBytes(_pg_data, &_pg_byteindex, 0.0f, 1.0f/2.0f);
 
-    case EFI_PKT_TELEMETRYSENSORS:      // Telemetry information for EFI sensors
-        if(data->cputm.api <= 7)
-        {
-            efiTelemetrySensorsapi7_t sensors = {0};
-            if(decodeefiTelemetrySensorsapi7Pkt(pkt, &sensors))
-            {
-                data->sensorstm.map = sensors.map;
-                data->sensorstm.mat = sensors.mat;
-                data->sensorstm.oat = sensors.oat;
-                data->sensorstm._cht = sensors._cht;
-                data->sensorstm.baro = sensors.baro;
-                data->sensorstm.sparetemp = sensors.sparetemp;
-                data->sensorstm.throttlePosSrc = data->fasttm.throttleCmdSrc;
+    // The third injector duty cycle in percent
+    // Range of injector3Duty is 0.0 to 127.5.
+    _pg_user->injector3Duty = float32ScaledFrom1UnsignedBytes(_pg_data, &_pg_byteindex, 0.0f, 1.0f/2.0f);
 
-                if(!data->sensors2tm.expectSensors4)
-                {
-                    data->sensors4tm.cht = sensors._cht;
-                    data->sensors4tm.cht1 = sensors._cht1;
-                    data->sensors4tm.cht2 = sensors._cht;
-                }
+    // The first injector duty cycle in percent
+    // Range of injector1Duty is 0.0 to 127.5.
+    _pg_user->injector1Duty = float32ScaledFrom1UnsignedBytes(_pg_data, &_pg_byteindex, 0.0f, 1.0f/2.0f);
 
-                return 1;
+    // The second injector duty cycle in percent
+    // Range of injector2Duty is 0.0 to 127.5.
+    _pg_user->injector2Duty = float32ScaledFrom1UnsignedBytes(_pg_data, &_pg_byteindex, 0.0f, 1.0f/2.0f);
 
-            }// if decoded api7
+    *_pg_bytecount = _pg_byteindex;
 
-        }// if older API
-        else
-            return decodeefiTelemetrySensorsPkt(pkt, &data->sensorstm);
-        break;
+    return true;
 
-    case EFI_PKT_TELEMETRYSENSORS2:     // Telemetry2 information for EFI sensors
-        if(decodeefiTelemetrySensors2Pkt(pkt, &data->sensors2tm))
-        {
-            return 1;
-        }
-        else
-        {
-            // These angles are unknown in the older encoding
-            data->sensors2tm.measuredCrank2Angle = 0;
-            data->sensors2tm.devCrank2Angle = 0;
-
-            // Check the api7 and older encoding
-            efiTelemetrySensors2api7_t sensors2;
-            if(decodeefiTelemetrySensors2api7Pkt(pkt, &sensors2))
-            {
-                data->sensors2tm.density           = sensors2.density;
-                data->sensors2tm.expectSensors4    = sensors2.expectSensors4;
-                data->sensors2tm.api8              = sensors2.api8;
-                data->sensors2tm.crankSense1Active = sensors2.crankSense1Active;
-                data->sensors2tm.crankSense2Active = sensors2.crankSense2Active;
-                data->sensors2tm.cooling2          = sensors2.cooling2;
-                data->sensors2tm.tpsError          = sensors2.tpsError;
-                data->sensors2tm.analogTPS         = sensors2.analogTPS;
-                data->sensors2tm.pwmTPS            = sensors2.pwmTPS;
-
-                // Special logic for older systems that will not send sensors 4
-                if(!data->sensors2tm.expectSensors4)
-                    data->sensors4tm.fuelp = sensors2._fuelp;
-
-                return 1;
-            }
-
-            return 0;
-        }
-        break;
-
-    case EFI_PKT_TELEMETRYSENSORS3:     // Telemetry3 information for EFI sensors
-        return decodeefiTelemetrySensors3Pkt(pkt, &data->sensors3tm);
-        break;
-
-    case EFI_PKT_TELEMETRYSENSORS4:     // Telemetry4 information for EFI sensors
-        return decodeefiTelemetrySensors4Pkt(pkt, &data->sensors4tm);
-        break;
-
-    case EFI_PKT_TELEMETRYFUEL:         // EFI fuel information slow telemetry
-        return decodeefiTelemetryFuelPkt(pkt, &data->fueltm);
-        break;
-
-    case EFI_PKT_TELEMETRYSLOW:         // Miscellanious slow telemetry
-        if(data->cputm.api <= 7)
-        {
-            efiTelemetrySlowapi7_t slowtm;
-            memset(&slowtm, 0, sizeof(slowtm));
-            if(decodeefiTelemetrySlowapi7Pkt(pkt, &slowtm))
-            {
-                data->extendedoutputstm.sparkAdvance2 = slowtm._sparkAdvance2;
-
-                // Tweak to slow telemetry layout in api8
-                memset(&data->slowtm, 0, sizeof(data->slowtm));
-                data->slowtm.power = slowtm.power;
-                data->slowtm.rpmcmd = slowtm.rpmcmd;
-                data->slowtm.cooling1 = slowtm.cooling1;
-                data->slowtm.pumpduty = slowtm.pumpduty;
-                data->slowtm.sparkAdvance1 = slowtm.sparkAdvance1;
-                data->slowtm.rpmControllerFromUser = slowtm.rpmControllerFromUser;
-                data->slowtm.rpmControllerFromThrottle = slowtm.rpmControllerFromThrottle;
-                return 1;
-            }
-            else
-                return 0;
-        }
-        else
-            return decodeefiTelemetrySlowPkt(pkt, &data->slowtm);
-        break;
-
-    case EFI_PKT_TELEMETRYINJECTOR:
-        return decodeefiTelemetryInjectorPkt(pkt, &data->injectortm);
-        break;
-
-    case EFI_PKT_TELEMETRYEXTENDEDOUTPUTS:
-        return decodeefiTelemetryExtendedOutputsPkt(pkt, &data->extendedoutputstm);
-        break;
-
-    case EFI_PKT_TELEMETRYCPU:          // CPU load telemetry
-        if(decodeefiTelemetryCPUPkt(pkt, &data->cputm))
-        {
-            if(!data->cputm.gcuPresent)
-            {
-                // Null out the GCU data
-                memset(&data->gcutm, 0, sizeof(data->gcutm));
-            }
-
-            return 1;
-        }
-        else
-            return 0;
-        break;
-
-    case EFI_PKT_TELEMETRYCOMMS:
-        return decodeefiTelemetryCommsPkt(pkt, &data->comms);
-        break;
-
-    case EFI_PKT_TELEMETRYSDCARD:
-        return decodeefiTelemetrySDCardPkt(pkt, &data->sdjournal.sdcardtm);
-        break;
-
-    case EFI_PKT_TELEMETRYGCU:
-        return decodeefiTelemetryGCUPkt(pkt, &data->gcutm);
-        break;
-
-    case EFI_PKT_TELEMETRYOILINJ:
-        return decodeefiTelemetryOilInjectionPkt(pkt, &data->oilinj);
-        break;
-
-    case EFI_PKT_TELEMETRYSLOWSUM:
-
-        // The slow summary packet has expanded multiple times.
-        if(decodeefiTelemetrySlowSummaryPkt(pkt, &data->timetm, &data->sensorstm, &data->sensors2tm, &data->fueltm, &data->injectortm, &data->slowtm, &data->cputm, &data->sensors3tm, &data->dynamicerrors, &data->stickyerrors, &data->wear, &data->comms, &data->sensors4tm, &data->sdjournal.sdcardtm, &data->extendedoutputstm))
-            return 1;
-        else
-            return decodeOldSlowSummaryPkt(pkt, data);
-        break;
-
-    case EFI_PKT_TELEMETRYFASTSUM:
-        return decodeefiTelemetryFastSummaryPkt(pkt, &data->timetm, &data->fasttm);
-        break;
-    }
-
-    return 0;
-
-}// processIntelliJectDataPacket
+}// decodeefiTelemetryFast_t
 #endif // HAL_EFI_ENABLED
